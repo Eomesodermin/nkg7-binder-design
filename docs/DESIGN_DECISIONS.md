@@ -135,10 +135,51 @@ the final report can cite it.
   mlgpu (SIGILL). (b) Running AF2 on a different (Intel) GPU partition — not
   pursued because the pip-Boltz-2 route is portable across node types and
   removes the hardware dependency entirely.
-- **Residual risk.** Single-model validator (no AF2×Boltz consensus in v1). A
-  second independent model (e.g. Chai-1) could be added as a consensus filter in
-  a production campaign; the filter script is schema-specific but the stage is
-  swappable.
+- **Residual risk.** Single primary validator. This is now mitigated by an
+  orthogonal-consensus stage (Chai-1) — see §9.
 - **Reusability note.** On a homogeneous Intel cluster the EasyBuild ColabFold
   module would work and AF2 could be swapped back in; the pipeline isolates the
   validator in one stage script + one parser, so this is a localized change.
+
+## 9. Orthogonal consensus + cross-species + winners bundle as pipeline stages
+
+- **Decision.** Promote three previously-manual post-processing steps into
+  built-in, config-toggled pipeline stages that run in the SLURM DAG after the
+  primary Boltz-2 validation:
+  1. **Orthogonal consensus** (`stage_chai.sh`, `04_chai`) — Chai-1 re-folds the
+     same binder:target complexes with an independent all-atom model. A design
+     is a *consensus hit* only if it passes Boltz-2 **and** Chai ipTM ≥
+     `chai_iptm_min`.
+  2. **Cross-species reactivity** (`stage_crossspecies.sh`, `05_crossspecies`) —
+     each arm's top-N binders are re-folded against the *other* species' target;
+     a design passing ipTM against **both** targets is predicted cross-reactive.
+  3. **Winners bundle** (`harvest.py` → `top_candidates/<arm>/`) — the deliverable
+     copies each winner's complex PDB + binder FASTA + score row into one folder
+     instead of leaving pointers into Lustre scratch.
+- **Why.** (1) A single cofolder can score a design highly on model-specific
+  artifacts; requiring two independent models to agree is a standard, cheap
+  guard for de novo binders. Chai-1 is Apache-2.0, pip-installed (AVX2-safe like
+  Boltz — §8), and runs on ESM embeddings without an MSA server, so it needs no
+  compute-node egress. (2) The user runs separate human and mouse campaigns and
+  explicitly wanted cross-reactivity tested; making it a stage means every
+  campaign produces the cross read automatically rather than depending on a
+  manual follow-up. (3) A self-contained bundle is what a collaborator or wet-lab
+  actually needs.
+- **Rejected alternatives.** (a) Leaving these as manual steps — rejected because
+  they were easy to forget and the cross-species read was a stated requirement.
+  (b) A third validator (AF2/OpenFold3) for consensus — deferred; two-model
+  consensus is the usual bar and AF2 is blocked on marvin's AMD nodes anyway (§8).
+  (c) Folding *all* designs cross-species — wasteful; only the native top-N are
+  worth the cross read, controlled by `crossspecies.topn_*`.
+- **Residual risk.** Consensus uses ESM-embedding (no-MSA) Chai, a few ipTM
+  points below an MSA-backed run — it is a relative agreement filter, not an
+  absolute affinity measure. Cross-species ipTM is a predicted-complex plausibility
+  signal, not a binding assay; all cross-reactive calls need experimental
+  confirmation. Both stages are `enabled:` flags in the config, so a target where
+  they don't apply (single species, no second model available) skips them cleanly.
+- **Verification.** Both stages were run end-to-end on marvin A40 nodes for two
+  smoke-test arms (human_ecl2, mouse_ecl2): Chai scored all 8 designs/arm,
+  cross-species folded 8 complexes/arm against the opposite target, and harvest
+  merged `consensus_pass`/`cross_species_pass`/`chai_iptm`/`cross_iptm` into the
+  ranked table and wrote the winners bundle. 0 consensus/cross hits at smoke
+  scale (T=25), as expected.

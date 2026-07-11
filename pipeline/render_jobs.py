@@ -168,6 +168,79 @@ echo "[{arm}] scored $NJ complexes"
 """
 
 
+def chai_script(arm, cfg, ws, mode):
+    """Chai-1 orthogonal-consensus refold of the same binder:target complexes."""
+    d = cfg["defaults"]["consensus"]
+    v = cfg["defaults"]["validator"]
+    nd = d["diffn_timesteps_smoketest"] if mode == "smoketest" else d["diffn_timesteps_production"]
+    rec = d["recycling_steps"]
+    cap = v.get("max_complexes_smoketest", 0) if mode == "smoketest" else v.get("max_complexes_production", 0)
+    a = cfg["arms"][arm]
+    sp = a["species"]
+    mpnndir = f"{ws}/runs/{mode}/{arm}/02_proteinmpnn"
+    outdir = f"{ws}/runs/{mode}/{arm}/04_chai"
+    target_seq_file = f"{ws}/targets/{sp}_target.seq"
+    partition = "mlgpu_devel" if mode == "smoketest" else "mlgpu_short"
+    time = "01:00:00" if mode == "smoketest" else "08:00:00"
+    return f"""#!/bin/bash
+{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='64G')}
+set -eo pipefail
+{CONDA}
+conda activate chai
+export CHAI_DOWNLOADS_DIR={ws}/software/chai_downloads
+mkdir -p {outdir}
+export MPNN_DIR="{mpnndir}"
+export TARGET_SEQ="$(cat {target_seq_file})"
+export OUT_DIR="{outdir}"
+export CAP={cap}
+export DIFFN_TIMESTEPS={nd}
+export RECYCLES={rec}
+bash {ws}/pipeline/stage_chai.sh
+"""
+
+
+def crossspecies_script(arm, cfg, ws, mode):
+    """Fold this arm's top-N binders against the OTHER species' target (Boltz-2)."""
+    d = cfg["defaults"]["crossspecies"]
+    topn = d["topn_smoketest"] if mode == "smoketest" else d["topn_production"]
+    ds = d["diffusion_samples"]
+    rec = d["recycling_steps"]
+    a = cfg["arms"][arm]
+    sp = a["species"]
+    cross_sp = d["species_map"][sp]
+    mpnndir = f"{ws}/runs/{mode}/{arm}/02_proteinmpnn"
+    outdir = f"{ws}/runs/{mode}/{arm}/05_crossspecies"
+    native_ranked = f"{ws}/runs/{mode}/{arm}/04_filtered/{arm}_ranked.csv"
+    cross_seq_file = f"{ws}/targets/{cross_sp}_target.seq"
+    partition = "mlgpu_devel" if mode == "smoketest" else "mlgpu_short"
+    time = "01:00:00" if mode == "smoketest" else "08:00:00"
+    return f"""#!/bin/bash
+{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='48G')}
+set -eo pipefail
+{CONDA}
+conda activate boltz
+mkdir -p {outdir} {ws}/runs/{mode}/{arm}/04_filtered
+# Rank the native-target designs first so we know the top-N to cross-fold.
+python {ws}/pipeline/filter_designs.py \\
+  --boltz-dir {ws}/runs/{mode}/{arm}/03_boltz \\
+  --backbone-dir {ws}/runs/{mode}/{arm}/01_rfdiffusion \\
+  --binder-chain {a['binder_chain']} --target-chain {a['target_chain']} \\
+  --iptm-min {cfg['defaults']['filters']['iptm_min']} \\
+  --plddt-min {cfg['defaults']['filters']['complex_plddt_min']} \\
+  --binder-ptm-min {cfg['defaults']['filters']['binder_ptm_min']} \\
+  --rmsd-max {cfg['defaults']['filters']['binder_rmsd_max']} \\
+  --arm {arm} --out {native_ranked}
+export MPNN_DIR="{mpnndir}"
+export NATIVE_RANKED="{native_ranked}"
+export CROSS_SEQ="$(cat {cross_seq_file})"
+export OUT_DIR="{outdir}"
+export TOPN={topn}
+export DIFF_SAMPLES={ds}
+export RECYCLES={rec}
+bash {ws}/pipeline/stage_crossspecies.sh
+"""
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
@@ -185,7 +258,12 @@ def main():
         adir = os.path.join(args.out, args.mode, arm)
         os.makedirs(adir, exist_ok=True)
         scripts = {}
-        for stage, fn in [("rfdiffusion", rfd_script), ("proteinmpnn", mpnn_script), ("boltz", boltz_script)]:
+        stages = [("rfdiffusion", rfd_script), ("proteinmpnn", mpnn_script), ("boltz", boltz_script)]
+        if cfg["defaults"].get("consensus", {}).get("enabled"):
+            stages.append(("chai", chai_script))
+        if cfg["defaults"].get("crossspecies", {}).get("enabled"):
+            stages.append(("crossspecies", crossspecies_script))
+        for stage, fn in stages:
             p = os.path.join(adir, f"{stage}.sbatch")
             with open(p, "w") as fh:
                 fh.write(fn(arm, cfg, args.ws, args.mode))
@@ -194,7 +272,8 @@ def main():
         manifest["arms"][arm] = scripts
     with open(os.path.join(args.out, f"manifest_{args.mode}.json"), "w") as fh:
         json.dump(manifest, fh, indent=2)
-    print(f"rendered {len(arms)} arms x 3 stages -> {args.out}/{args.mode}/")
+    nstages = len(next(iter(manifest["arms"].values()))) if manifest["arms"] else 0
+    print(f"rendered {len(arms)} arms x {nstages} stages -> {args.out}/{args.mode}/")
     print(f"manifest: {args.out}/manifest_{args.mode}.json")
 
 

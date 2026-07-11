@@ -22,8 +22,32 @@ defaults:
     complex_plddt_min: 0.7
     binder_ptm_min: 0.5
     binder_rmsd_max: 2.0
+    chai_iptm_min: 0.5
+    cross_iptm_min: 0.5
     note: Boltz-2 confidence fields are 0-1 scaled. iptm>0.5 community interface pass
-      line; complex_plddt>0.7 fold pass.
+      line; complex_plddt>0.7 fold pass. chai_iptm_min gates the orthogonal-consensus
+      pass; cross_iptm_min gates cross-species reactivity.
+  consensus:
+    enabled: true
+    tool: chai1
+    diffn_timesteps_smoketest: 80
+    diffn_timesteps_production: 200
+    recycling_steps: 3
+    note: Chai-1 orthogonal cofolder (ESM embeddings, no MSA). A design is a
+      consensus hit if it passes Boltz-2 AND Chai ipTM >= chai_iptm_min. Mirrors
+      the Boltz complex cap so both validators cover the same design set.
+  crossspecies:
+    enabled: true
+    topn_smoketest: 8
+    topn_production: 25
+    diffusion_samples: 1
+    recycling_steps: 3
+    species_map:
+      human: mouse
+      mouse: human
+    note: Re-fold each arm's top-N binders against the OTHER species' target with
+      Boltz-2. A design is cross-reactive if native ipTM AND cross ipTM both >=
+      cross_iptm_min. species_map names the cross target per arm species.
   validator:
     tool: boltz2
     recycling_steps: 3
