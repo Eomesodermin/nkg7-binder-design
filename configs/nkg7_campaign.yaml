@@ -7,10 +7,18 @@ binder:
 defaults:
   rfdiffusion:
     num_designs_smoketest: 50
-    num_designs_production: 2000
+    num_designs_production: 500
     model: Complex_base_ckpt.pt
     diffuser_T: 50
     denoiser_noise_scale: 0
+    n_shards_production: 4
+    n_shards_smoketest: 1
+    array_throttle: 2
+    note: Production splits num_designs across n_shards SLURM array tasks (each
+      does num_designs/n_shards backbones with a distinct seed and output prefix),
+      throttled to array_throttle concurrent GPUs to stay queue-friendly on the
+      shared cluster. 500 backbones/arm at T=50 was chosen for the first pass to
+      keep GPU-hour (fair-share) cost modest (~73 GPU-h across 6 arms).
   proteinmpnn:
     num_seq_per_target_smoketest: 8
     num_seq_per_target_production: 16
@@ -52,12 +60,16 @@ defaults:
     tool: boltz2
     recycling_steps: 3
     diffusion_samples_smoketest: 1
-    diffusion_samples_production: 5
     msa_mode: single_sequence
     no_kernels: true
     note: ColabFold/Boltz-1 EasyBuild modules SIGILL on mlgpu (AVX-512 vs AMD AVX2
-      nodes); pip Boltz-2 is AVX2-safe.
+      nodes); pip Boltz-2 is AVX2-safe. diffusion_samples_production lowered to 1
+      for the first pass (5x cheaper); refine winners at ds=5 later.
+    diffusion_samples_production: 1
+    top_seqs_per_backbone_production: 2
+    top_seqs_per_backbone_smoketest: 0
     max_complexes_smoketest: 8
+    chai_max_complexes_production: 50
     max_complexes_production: 0
 target:
   name: NKG7

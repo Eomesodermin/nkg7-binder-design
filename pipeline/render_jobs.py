@@ -38,36 +38,52 @@ def rfd_script(arm, cfg, ws, mode):
     d = cfg["defaults"]["rfdiffusion"]
     n = d["num_designs_smoketest"] if mode == "smoketest" else d["num_designs_production"]
     T = 25 if mode == "smoketest" else d["diffuser_T"]
+    nshards = d.get("n_shards_smoketest", 1) if mode == "smoketest" else d.get("n_shards_production", 1)
+    throttle = d.get("array_throttle", 2)
     a = cfg["arms"][arm]
     hs = ",".join(a["hotspot_res"])
     rundir = f"{ws}/runs/{mode}/{arm}/01_rfdiffusion"
     target = f"{ws}/targets/{os.path.basename(a['target_pdb'])}"
     partition = "mlgpu_devel" if mode == "smoketest" else "mlgpu_short"
     time = "01:00:00" if mode == "smoketest" else "08:00:00"
+    # SLURM array: shard k runs designs [k*per, (k+1)*per) with a distinct seed,
+    # numbering them contiguously via inference.design_startnum so files never collide.
+    array_line = f"#SBATCH --array=0-{nshards-1}%{throttle}\n" if nshards > 1 else ""
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='32G')}
-set -eo pipefail
+{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='32G')}{array_line}set -eo pipefail
 {CONDA}
 conda activate SE3nv
 module load CUDA/11.7.0
 export DGLBACKEND=pytorch
 mkdir -p {rundir}
 cd {ws}/software/RFdiffusion
-echo "[{arm}] RFdiffusion N={n} T={T} hotspots={hs}"
+SHARD=${{SLURM_ARRAY_TASK_ID:-0}}
+NSHARDS={nshards}
+PER=$(( {n} / NSHARDS ))
+STARTNUM=$(( SHARD * PER ))
+# last shard absorbs any remainder so the arm gets exactly {n} backbones
+if [ "$SHARD" -eq "$(( NSHARDS - 1 ))" ]; then PER=$(( {n} - STARTNUM )); fi
+# RFdiffusion has no inference.seed key; with inference.deterministic=True it
+# seeds each design by its running index i_des. Distinct design_startnum per
+# shard therefore gives each shard a distinct, non-overlapping seed range and
+# unique output file numbers ({arm}_<startnum..>.pdb) — no collisions.
+echo "[{arm}] RFdiffusion shard $SHARD/$NSHARDS: $PER designs from #$STARTNUM T={T} hotspots={hs}"
 START=$SECONDS
 python scripts/run_inference.py \\
   inference.output_prefix={rundir}/{arm} \\
   inference.model_directory_path={ws}/software/RFdiffusion/models \\
   inference.input_pdb={target} \\
-  inference.num_designs={n} \\
+  inference.num_designs=$PER \\
+  inference.design_startnum=$STARTNUM \\
+  inference.deterministic=True \\
   'contigmap.contigs={a["contig"]}' \\
   'ppi.hotspot_res=[{hs}]' \\
   denoiser.noise_scale_ca={d["denoiser_noise_scale"]} \\
   denoiser.noise_scale_frame={d["denoiser_noise_scale"]} \\
   diffuser.T={T}
-echo "[{arm}] RFdiffusion runtime $((SECONDS-START))s"
+echo "[{arm}] RFdiffusion shard $SHARD runtime $((SECONDS-START))s"
 NB=$(ls {rundir}/{arm}_*.pdb 2>/dev/null | wc -l)
-echo "[{arm}] produced $NB backbones"
+echo "[{arm}] backbones present after shard $SHARD: $NB"
 [ "$NB" -gt 0 ] && echo "STAGE_RFD_OK"
 """
 
@@ -116,6 +132,8 @@ def boltz_script(arm, cfg, ws, mode):
     ds = d["diffusion_samples_smoketest"] if mode == "smoketest" else d["diffusion_samples_production"]
     rec = d["recycling_steps"]
     cap = d.get("max_complexes_smoketest", 0) if mode == "smoketest" else d.get("max_complexes_production", 0)
+    # production: fold only the top-N ProteinMPNN sequences per backbone (by score)
+    top_seqs = d.get("top_seqs_per_backbone_smoketest", 0) if mode == "smoketest" else d.get("top_seqs_per_backbone_production", 0)
     a = cfg["arms"][arm]
     sp = a["species"]
     mpnndir = f"{ws}/runs/{mode}/{arm}/02_proteinmpnn"
@@ -123,76 +141,60 @@ def boltz_script(arm, cfg, ws, mode):
     yamldir = f"{outdir}/yamls"
     target_seq_file = f"{ws}/targets/{sp}_target.seq"
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition='mlgpu_devel' if mode=='smoketest' else 'mlgpu_short', time='01:00:00' if mode=='smoketest' else '08:00:00', gpus=1, cpus=8, mem='48G')}
-set -eo pipefail
+{SBATCH_HEADER.format(account='ag_iei_abdullah', partition='mlgpu_devel' if mode=='smoketest' else 'mlgpu_short', time='01:00:00' if mode=='smoketest' else '08:00:00', gpus=1, cpus=8, mem='48G')}set -eo pipefail
 {CONDA}
 conda activate boltz
 mkdir -p {yamldir} {outdir}
-TARGET_SEQ=$(cat {target_seq_file})
-# Build one binder:target complex YAML per ProteinMPNN design (single-seq mode).
-python - "{mpnndir}" "{yamldir}" "$TARGET_SEQ" <<'PYEOF'
-import glob, os, sys
-mpnn_dir, yaml_dir, target_seq = sys.argv[1], sys.argv[2], sys.argv[3]
-n=0
-for fa in glob.glob(os.path.join(mpnn_dir,"seqs","*.fa")):
-    stem=os.path.basename(fa)[:-3]
-    recs=open(fa).read().split(">")
-    for si,rec in enumerate(recs[2:]):   # si = sample index within this backbone -> unique
-        lines=rec.strip().split("\\n")
-        if len(lines)<2: continue
-        seq="".join(lines[1:]).strip()
-        if not seq: continue
-        did=f"{{stem}}_s{{si}}".replace("/","_").replace(".","_")   # e.g. mouse_ecl2_7_s3
-        with open(os.path.join(yaml_dir,f"{{did}}.yaml"),"w") as o:
-            o.write("version: 1\\nsequences:\\n")
-            o.write(f"  - protein:\\n      id: A\\n      sequence: {{target_seq}}\\n      msa: empty\\n")
-            o.write(f"  - protein:\\n      id: B\\n      sequence: {{seq}}\\n      msa: empty\\n")
-        n+=1
-print(f"[boltz] wrote {{n}} complex YAMLs")
-PYEOF
-# Optional smoke-test cap: keep only the first N complex YAMLs.
-CAP={cap}
-if [ "$CAP" -gt 0 ]; then
-  # SIGPIPE-safe cap: delete every YAML past the first $CAP (sorted).
-  ls {yamldir}/*.yaml | sort | tail -n +$((CAP+1)) | xargs -r rm -f
-  echo "[{arm}] capped to $CAP complexes for smoketest"
-fi
-echo "[{arm}] Boltz-2 folding complexes (diffusion_samples={ds} recycles={rec})"
-START=$SECONDS
-boltz predict {yamldir} --out_dir {outdir} --recycling_steps {rec} \\
-  --diffusion_samples {ds} --no_kernels --output_format pdb
-echo "[{arm}] Boltz runtime $((SECONDS-START))s"
-NJ=$(find {outdir} -name 'confidence_*_model_0.json' | wc -l)
-echo "[{arm}] scored $NJ complexes"
-[ "$NJ" -gt 0 ] && echo "STAGE_BOLTZ_OK"
+export MPNN_DIR="{mpnndir}"
+export TARGET_SEQ="$(cat {target_seq_file})"
+export OUT_DIR="{outdir}"
+export DIFF_SAMPLES={ds}
+export RECYCLES={rec}
+export TOP_SEQS={top_seqs}
+export CAP={cap}
+# stage_boltz.sh builds YAMLs (top-N seqs/backbone if TOP_SEQS>0, then absolute
+# CAP if >0) and folds them with Boltz-2.
+bash {ws}/pipeline/stage_boltz.sh
 """
 
 
 def chai_script(arm, cfg, ws, mode):
-    """Chai-1 orthogonal-consensus refold of the same binder:target complexes."""
+    """Chai-1 orthogonal-consensus refold of the TOP Boltz designs."""
     d = cfg["defaults"]["consensus"]
     v = cfg["defaults"]["validator"]
+    f = cfg["defaults"]["filters"]
     nd = d["diffn_timesteps_smoketest"] if mode == "smoketest" else d["diffn_timesteps_production"]
     rec = d["recycling_steps"]
-    cap = v.get("max_complexes_smoketest", 0) if mode == "smoketest" else v.get("max_complexes_production", 0)
+    # smoke: mirror the small Boltz cap; production: fold the top-N Boltz designs.
+    chai_max = v.get("max_complexes_smoketest", 0) if mode == "smoketest" else v.get("chai_max_complexes_production", 0)
     a = cfg["arms"][arm]
     sp = a["species"]
     mpnndir = f"{ws}/runs/{mode}/{arm}/02_proteinmpnn"
     outdir = f"{ws}/runs/{mode}/{arm}/04_chai"
+    ranked = f"{outdir}/{arm}_boltz_ranked.csv"   # own copy — avoids racing crossspecies
     target_seq_file = f"{ws}/targets/{sp}_target.seq"
     partition = "mlgpu_devel" if mode == "smoketest" else "mlgpu_short"
     time = "01:00:00" if mode == "smoketest" else "08:00:00"
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='64G')}
-set -eo pipefail
+{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='64G')}set -eo pipefail
 {CONDA}
+conda activate boltz
+mkdir -p {outdir}
+# Rank the native Boltz designs so Chai folds the top ones (consensus on the shortlist).
+python {ws}/pipeline/filter_designs.py \\
+  --boltz-dir {ws}/runs/{mode}/{arm}/03_boltz \\
+  --backbone-dir {ws}/runs/{mode}/{arm}/01_rfdiffusion \\
+  --binder-chain {a['binder_chain']} --target-chain {a['target_chain']} \\
+  --iptm-min {f['iptm_min']} --plddt-min {f['complex_plddt_min']} \\
+  --binder-ptm-min {f['binder_ptm_min']} --rmsd-max {f['binder_rmsd_max']} \\
+  --arm {arm} --out {ranked}
 conda activate chai
 export CHAI_DOWNLOADS_DIR={ws}/software/chai_downloads
-mkdir -p {outdir}
 export MPNN_DIR="{mpnndir}"
 export TARGET_SEQ="$(cat {target_seq_file})"
 export OUT_DIR="{outdir}"
-export CAP={cap}
+export NATIVE_RANKED="{ranked}"
+export CHAI_MAX={chai_max}
 export DIFFN_TIMESTEPS={nd}
 export RECYCLES={rec}
 bash {ws}/pipeline/stage_chai.sh
@@ -210,16 +212,15 @@ def crossspecies_script(arm, cfg, ws, mode):
     cross_sp = d["species_map"][sp]
     mpnndir = f"{ws}/runs/{mode}/{arm}/02_proteinmpnn"
     outdir = f"{ws}/runs/{mode}/{arm}/05_crossspecies"
-    native_ranked = f"{ws}/runs/{mode}/{arm}/04_filtered/{arm}_ranked.csv"
+    native_ranked = f"{outdir}/{arm}_boltz_ranked.csv"   # own copy — no cross-stage race
     cross_seq_file = f"{ws}/targets/{cross_sp}_target.seq"
     partition = "mlgpu_devel" if mode == "smoketest" else "mlgpu_short"
     time = "01:00:00" if mode == "smoketest" else "08:00:00"
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='48G')}
-set -eo pipefail
+{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='48G')}set -eo pipefail
 {CONDA}
 conda activate boltz
-mkdir -p {outdir} {ws}/runs/{mode}/{arm}/04_filtered
+mkdir -p {outdir}
 # Rank the native-target designs first so we know the top-N to cross-fold.
 python {ws}/pipeline/filter_designs.py \\
   --boltz-dir {ws}/runs/{mode}/{arm}/03_boltz \\
