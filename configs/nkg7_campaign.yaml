@@ -1,0 +1,162 @@
+campaign: NKG7_ECL_binders
+description: De novo mini-binders vs NKG7 extracellular loops ECL1/ECL2. Config-driven;
+  reusable for any target.
+binder:
+  length_range: 50-65
+  type: de_novo_minibinder
+defaults:
+  rfdiffusion:
+    num_designs_smoketest: 50
+    num_designs_production: 2000
+    model: Complex_base_ckpt.pt
+    diffuser_T: 50
+    denoiser_noise_scale: 0
+  proteinmpnn:
+    num_seq_per_target_smoketest: 8
+    num_seq_per_target_production: 16
+    sampling_temp: '0.1'
+    model_name: v_48_020
+    use_soluble_model: true
+  filters:
+    iptm_min: 0.5
+    complex_plddt_min: 0.7
+    binder_ptm_min: 0.5
+    binder_rmsd_max: 2.0
+    note: Boltz-2 confidence fields are 0-1 scaled. iptm>0.5 community interface pass
+      line; complex_plddt>0.7 fold pass.
+  validator:
+    tool: boltz2
+    recycling_steps: 3
+    diffusion_samples_smoketest: 1
+    diffusion_samples_production: 5
+    msa_mode: single_sequence
+    no_kernels: true
+    note: ColabFold/Boltz-1 EasyBuild modules SIGILL on mlgpu (AVX-512 vs AMD AVX2
+      nodes); pip Boltz-2 is AVX2-safe.
+    max_complexes_smoketest: 8
+    max_complexes_production: 0
+target:
+  name: NKG7
+  human:
+    acc: Q16617
+    pdb: targets/NKG7_human_Q16617_AF.pdb
+    length: 165
+  mouse:
+    acc: Q99PA5
+    pdb: targets/NKG7_mouse_Q99PA5_AF.pdb
+    length: 165
+topology:
+  TM:
+  - - 9
+    - 29
+  - - 61
+    - 81
+  - - 92
+    - 112
+  - - 133
+    - 153
+  ECL1:
+  - 30
+  - 60
+  ECL2:
+  - 113
+  - 132
+ensemble:
+  method: restrained_md
+  n_conformers: 12
+  loops:
+  - 30-60
+  - 113-132
+  restraint_k: 10.0
+  temp: 310.0
+  note: Loops have no disulfides + moderate pLDDT -> design across conformers, not
+    one AF snapshot.
+arms:
+  human_ecl1:
+    species: human
+    epitope: ecl1
+    target_pdb: targets/NKG7_human_Q16617_AF.pdb
+    target_chain: A
+    hotspot_res:
+    - A36
+    - A43
+    - A45
+    - A47
+    - A50
+    - A56
+    contig: '[A1-165/0 50-65]'
+    binder_chain: B
+  human_ecl2:
+    species: human
+    epitope: ecl2
+    target_pdb: targets/NKG7_human_Q16617_AF.pdb
+    target_chain: A
+    hotspot_res:
+    - A117
+    - A118
+    - A122
+    - A124
+    - A128
+    - A131
+    contig: '[A1-165/0 50-65]'
+    binder_chain: B
+  human_composite:
+    species: human
+    epitope: composite
+    target_pdb: targets/NKG7_human_Q16617_AF.pdb
+    target_chain: A
+    hotspot_res:
+    - A36
+    - A45
+    - A47
+    - A50
+    - A117
+    - A122
+    - A128
+    - A131
+    contig: '[A1-165/0 50-65]'
+    binder_chain: B
+  mouse_ecl1:
+    species: mouse
+    epitope: ecl1
+    target_pdb: targets/NKG7_mouse_Q99PA5_AF.pdb
+    target_chain: A
+    hotspot_res:
+    - A35
+    - A36
+    - A45
+    - A47
+    - A48
+    - A50
+    contig: '[A1-165/0 50-65]'
+    binder_chain: B
+  mouse_ecl2:
+    species: mouse
+    epitope: ecl2
+    target_pdb: targets/NKG7_mouse_Q99PA5_AF.pdb
+    target_chain: A
+    hotspot_res:
+    - A117
+    - A122
+    - A123
+    - A124
+    - A128
+    - A131
+    contig: '[A1-165/0 50-65]'
+    binder_chain: B
+  mouse_composite:
+    species: mouse
+    epitope: composite
+    target_pdb: targets/NKG7_mouse_Q99PA5_AF.pdb
+    target_chain: A
+    hotspot_res:
+    - A35
+    - A36
+    - A45
+    - A50
+    - A117
+    - A122
+    - A123
+    - A128
+    contig: '[A1-165/0 50-65]'
+    binder_chain: B

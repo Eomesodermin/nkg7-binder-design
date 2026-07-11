@@ -1,0 +1,7 @@
+species,epitope,arm,n,best_iptm,mean_iptm,best_plddt,best_composite,n_pass
+mouse,ecl2,mouse_ecl2,8,0.615,0.225,0.614,0.674,0
+human,ecl2,human_ecl2,8,0.625,0.263,0.618,0.648,0
+human,composite,human_composite,8,0.676,0.331,0.6,0.588,0
+mouse,composite,mouse_composite,8,0.478,0.317,0.615,0.574,0
+human,ecl1,human_ecl1,8,0.358,0.198,0.616,0.521,0
+mouse,ecl1,mouse_ecl1,8,0.256,0.146,0.624,0.486,0
