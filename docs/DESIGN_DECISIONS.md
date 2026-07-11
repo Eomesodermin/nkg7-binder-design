@@ -183,3 +183,45 @@ the final report can cite it.
   merged `consensus_pass`/`cross_species_pass`/`chai_iptm`/`cross_iptm` into the
   ranked table and wrote the winners bundle. 0 consensus/cross hits at smoke
   scale (T=25), as expected.
+
+## 10. Related work from an adjacent lab (external corroboration + refinement blueprint)
+
+Two 2025–2026 bioRxiv preprints from the Hölzel & Hagelueken groups (Bonn) work
+the same problem class (de novo AI minibinders against cancer cell-surface
+proteins) with the same toolchain we use, and independently corroborate several
+of our design choices. Recorded here for the methods write-up and for the
+round-2 refinement discussion.
+
+- **Broske et al. (2025), bioRxiv 2025.05.11.652819** — "Development of AI-designed
+  protein binders for detection and targeting of cancer cell surface proteins."
+  A discovery + experimental-validation + **benchmarking** workflow (RFdiffusion
+  generation with an α-helical-bundle fold filter; mammalian cell-surface + phage
+  display screening against PD-L1/CD276/VTCN1). Key result relevant to us:
+  **Chai-1 ipTM with ESM embeddings correlates with experimental binding success
+  and even predicts the deleterious effect of interface mutations.** This is a
+  direct, experimentally-grounded endorsement of our consensus scorer choice
+  (§9: Chai-1 + ESM embeddings), from real display data. NOT an evolution method.
+
+- **Tan et al. (2026), bioRxiv 2026.03.04.709551** — "Evolutionary algorithms
+  accelerate de novo design of potent Nectin-4-specific cancer biologics."
+  A **genetic algorithm (GA) wrapped around the AI design tools** to rescue a
+  target (Nectin-4) that plain RFdiffusion under-serves. GA skeleton (select →
+  diversify → score, tunable selection stringency) seeded from the best
+  RFdiffusion designs, run ~50 generations × 3 independent runs. Two swappable
+  mutation operators: **(I) structural — RFdiffusion partial diffusion + ProteinMPNN
+  re-sequencing; (II) sequence — direct sequence editing scored by Chai-1 + ESM2.**
+  Fitness = adjustable linear combination of binder pTM and complex ipTM; pAE-
+  interaction < 5 as the success threshold. ~408 A5000 GPU-h produced hundreds of
+  designs (92.4% pAE-int < 5); experimentally reached single-digit-nM to sub-nM
+  Nectin-4 binders. The GA is explicitly input-agnostic (any upstream designer's
+  outputs can seed it).
+
+  **Why this matters for our pipeline.** (a) Their "Option I" mutation operator —
+  partial diffusion + ProteinMPNN — IS the round-2 refinement stage we flagged to
+  add once winners land; Tan et al. show it works to sub-nM experimentally.
+  (b) Their fitness function is Chai-1 + ESM ipTM, which we already run as the
+  consensus scorer — so an EvoPro-style loop here should use our existing Chai
+  scorer rather than AF2. (c) Their harvested designs seed the GA directly, which
+  is exactly how our `harvest/top_candidates/` winners would feed a refinement
+  arm. When we revisit refinement, this paper is a validated blueprint for the
+  partial-diffusion route (vs. EvoPro's sequence-only, AF2-scored GA).
