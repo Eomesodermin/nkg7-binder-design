@@ -14,7 +14,7 @@ Design notes baked into the rendered scripts (see DESIGN_DECISIONS.md):
     TM bundle acts as a steric wall.
   * RFdiffusion uses noise_scale=0 for sharper binder backbones.
   * ProteinMPNN fixes the target chain, redesigns only the binder, soluble model.
-  * AF2 single-sequence multimer; filter on binder pLDDT / ipTM / interface PAE.
+  * Boltz-2 single-sequence complex fold; filter on ipTM / complex pLDDT / binder ptm / design-vs-refold RMSD.
 
 Usage:
   python render_jobs.py --config configs/nkg7_campaign.yaml \
