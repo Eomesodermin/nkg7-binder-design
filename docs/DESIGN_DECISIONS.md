@@ -211,7 +211,9 @@ round-2 refinement discussion.
   mutation operators: **(I) structural — RFdiffusion partial diffusion + ProteinMPNN
   re-sequencing; (II) sequence — direct sequence editing scored by Chai-1 + ESM2.**
   Fitness = adjustable linear combination of binder pTM and complex ipTM; pAE-
-  interaction < 5 as the success threshold. ~408 A5000 GPU-h produced hundreds of
+  interaction < 5 as the success threshold. **5 GA refinement runs total** (run 1
+  seeded from 12 seed designs, run 2 from 104, runs 3–5 refining emerging top
+  candidates), ~50 generations each. ~408 A5000 GPU-h produced hundreds of
   designs (92.4% pAE-int < 5); experimentally reached single-digit-nM to sub-nM
   Nectin-4 binders. The GA is explicitly input-agnostic (any upstream designer's
   outputs can seed it).
