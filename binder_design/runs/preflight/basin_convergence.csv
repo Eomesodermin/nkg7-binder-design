@@ -1,0 +1,5 @@
+target,within_rep_RMSF,cross_rep_mean,cross_rep_max,pooled_RMSF,verdict
+human_ECL1,0.98,1.89,2.79,1.26,DIVERGENT
+human_ECL2,0.84,0.99,1.36,0.98,DIVERGENT
+mouse_ECL1,1.0,2.45,3.57,1.43,DIVERGENT
+mouse_ECL2,0.82,0.7,1.09,0.89,borderline
