@@ -1,0 +1,7 @@
+arm,species,epitope,best_design,best_iptm,best_plddt,best_chai_iptm,best_composite,n_pass,n_consensus,n_crossrx,n_iptm_ge05,n_plddt_ge07
+human_ecl1,human,ecl1,human_ecl1_472_s8,0.774,0.671,0.171,0.741,0,0,5,205,0
+human_ecl2,human,ecl2,human_ecl2_482_s9,0.884,0.618,0.521,0.799,0,0,4,236,2
+human_composite,human,composite,human_composite_32_s7,0.781,0.6,0.276,0.734,0,0,1,191,0
+mouse_ecl1,mouse,ecl1,mouse_ecl1_95_s8,0.81,0.663,0.706,0.798,1,1,5,51,4
+mouse_ecl2,mouse,ecl2,mouse_ecl2_196_s5,0.783,0.566,0.783,0.716,2,0,4,54,5
+mouse_composite,mouse,composite,mouse_composite_468_s9,0.757,0.539,0.17,0.686,0,0,3,30,1

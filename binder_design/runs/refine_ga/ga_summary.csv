@@ -1,0 +1,5 @@
+arm,status,n_designs,seed_best_composite,final_best_composite,composite_gain,improved,final_best_design,final_best_iptm,final_best_plddt,final_best_gen
+human_ecl1,ok,199,0.7411,0.7411,0.0,0,human_ecl1_472_s8,0.7741,0.6713,0
+human_ecl2,ok,199,0.7994,0.7994,0.0,0,human_ecl2_482_s9,0.8836,0.6178,0
+mouse_ecl1,ok,199,0.7977,0.7977,0.0,0,mouse_ecl1_95_s8,0.8096,0.6626,0
+mouse_ecl2,ok,200,0.7161,0.7161,0.0,0,mouse_ecl2_196_s5,0.7829,0.5663,0

@@ -1,0 +1,7 @@
+arm,n_scored,n_pass,n_consensus,n_crossreactive,best_iptm,best_score,status
+human_ecl1,1000,0,0,5,0.7741,0.7411,ok
+human_ecl2,1000,0,0,4,0.8836,0.7994,ok
+human_composite,1000,0,0,1,0.7806,0.7341,ok
+mouse_ecl1,1000,1,1,5,0.756,0.7845,ok
+mouse_ecl2,1000,2,0,4,0.5365,0.6774,ok
+mouse_composite,1000,0,0,3,0.7571,0.6864,ok
