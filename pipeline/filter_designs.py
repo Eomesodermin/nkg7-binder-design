@@ -11,6 +11,16 @@ Boltz-2 confidence fields which are 0-1 scaled):
   - binder_rmsd   : CA-RMSD between the RFdiffusion backbone and the Boltz-refolded
                     binder (self-consistency; requires the design backbone).
 
+ds>1 AGGREGATION (--aggregate): with diffusion_samples>1 there are N independent
+folds per design (model_0..model_{N-1}). Single-fold scores are noisy (measured
+ipTM within-5 std ~0.08), so a re-fold/validation pass aggregates the N folds:
+  - single       : legacy, model_0 only.
+  - mean         : rank on the MEAN of the N per-sample metrics (a lucky single
+                   fold no longer wins).
+  - mean_penalty : rank on mean_iptm - penalty*iptm_std, penalising designs whose
+                   fold is unstable across samples (--stability-penalty, default 1.0).
+Aggregated runs emit *_std and n_models columns.
+
 A design PASSES if it clears all configured thresholds. Ranking is by a
 composite score (see composite_score) among passers.
 
@@ -94,46 +104,99 @@ def main():
     ap.add_argument("--binder-ptm-min", type=float, default=0.5)
     ap.add_argument("--rmsd-max", type=float, default=2.0)
     ap.add_argument("--arm", default="")
+    ap.add_argument("--aggregate", choices=["single", "mean", "mean_penalty"], default="single",
+                    help="ds>1 fold aggregation: single=model_0 only; mean=mean of all samples; "
+                         "mean_penalty=mean_iptm - penalty*iptm_std")
+    ap.add_argument("--stability-penalty", type=float, default=1.0,
+                    help="coefficient on iptm_std subtracted in mean_penalty mode")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--extra-boltz-dirs", nargs="*", default=[],
+                    help="additional boltz dirs to POOL (full-scale: one per conformer)")
+    ap.add_argument("--extra-backbone-dirs", nargs="*", default=[],
+                    help="additional RFdiffusion backbone dirs to search for RMSD reference")
     args = ap.parse_args()
 
-    # enumerate designs by their confidence files
-    conf_files = glob.glob(os.path.join(args.boltz_dir, "**", "confidence_*_model_0.json"), recursive=True)
+    # enumerate designs by their model_0 confidence files (one per design).
+    # Full-scale pools across conformers: glob every boltz dir (each recurses into
+    # its shard_* subdirs). Design ids carry the arm+conformer tag so they stay unique.
+    boltz_dirs = [args.boltz_dir] + list(args.extra_boltz_dirs or [])
+    backbone_dirs = ([args.backbone_dir] if args.backbone_dir else []) + list(args.extra_backbone_dirs or [])
+    conf_files = []
+    for bd in boltz_dirs:
+        conf_files += glob.glob(os.path.join(bd, "**", "confidence_*_model_0.json"), recursive=True)
     rows = []
     for cf in sorted(conf_files):
         m = re.search(r"confidence_(.+)_model_0\.json", os.path.basename(cf))
         name = m.group(1) if m else os.path.basename(cf)
-        conf = json.load(open(cf))
-        pdb = None
         pdir = os.path.dirname(cf)
+
+        # gather ALL diffusion samples for this design (model_0..model_{N-1}).
+        # In "single" mode we only use model_0; otherwise we aggregate every model.
+        sample_confs = {0: json.load(open(cf))}
+        if args.aggregate != "single":
+            for mf in glob.glob(os.path.join(pdir, f"confidence_{name}_model_*.json")):
+                mm = re.search(r"_model_(\d+)\.json", os.path.basename(mf))
+                if mm:
+                    idx = int(mm.group(1))
+                    if idx not in sample_confs:
+                        sample_confs[idx] = json.load(open(mf))
+        n_models = len(sample_confs)
+
+        def metric_series(getter):
+            vals = [getter(c) for c in sample_confs.values()]
+            return np.array([v for v in vals if v is not None], dtype=float)
+
+        iptm_s = metric_series(lambda c: c.get("iptm", c.get("protein_iptm")))
+        plddt_s = metric_series(lambda c: c.get("complex_plddt"))
+        bptm_s = metric_series(lambda c: binder_ptm(c, args.binder_chain_idx))
+
+        # per-metric point estimate: model_0 in single mode, else the mean.
+        def agg(series, model0_val):
+            if args.aggregate == "single" or len(series) == 0:
+                return model0_val
+            return float(np.mean(series))
+        conf0 = sample_confs[0]
+        iptm = agg(iptm_s, conf0.get("iptm", conf0.get("protein_iptm")))
+        plddt = agg(plddt_s, conf0.get("complex_plddt"))
+        bptm = agg(bptm_s, binder_ptm(conf0, args.binder_chain_idx))
+        iptm_std = float(np.std(iptm_s)) if len(iptm_s) > 1 else 0.0
+        plddt_std = float(np.std(plddt_s)) if len(plddt_s) > 1 else 0.0
+
+        # RMSD is measured on the model_0 structure (self-consistency of the backbone
+        # is fold-invariant enough; the point estimate stays cheap + comparable).
+        pdb = None
         for ext in ("pdb", "cif"):
             hits = glob.glob(os.path.join(pdir, f"{name}_model_0.{ext}"))
             if hits:
                 pdb = hits[0]; break
         rmsd = np.nan
-        if args.backbone_dir and pdb and pdb.endswith(".pdb"):
-            bb = glob.glob(os.path.join(args.backbone_dir, f"{name}.pdb"))
-            if not bb:
-                # design name is <arm>_<backbone#>_s<sample>; the backbone file is
-                # <arm>_<backbone#>.pdb -> strip the trailing _s<sample> suffix.
-                stem = re.sub(r"_s\d+$", "", name)
-                bb = glob.glob(os.path.join(args.backbone_dir, f"{stem}.pdb"))
-                if not bb:  # fallback: strip last underscore token
-                    bb = glob.glob(os.path.join(args.backbone_dir, f"{stem.rsplit('_',1)[0]}.pdb"))
+        if backbone_dirs and pdb and pdb.endswith(".pdb"):
+            # design name is <arm>_<conf>_<backbone#>_s<sample>; backbone file is
+            # <arm>_<conf>_<backbone#>.pdb. Search every backbone dir (pooled across
+            # conformers) for an exact then suffix-stripped match.
+            stem = re.sub(r"_s\d+$", "", name)
+            bb = []
+            for bd in backbone_dirs:
+                bb = (glob.glob(os.path.join(bd, f"{name}.pdb"))
+                      or glob.glob(os.path.join(bd, f"{stem}.pdb"))
+                      or glob.glob(os.path.join(bd, f"{stem.rsplit('_',1)[0]}.pdb")))
+                if bb:
+                    break
             if bb:
                 rmsd = ca_rmsd(bb[0], args.binder_chain, pdb, args.binder_chain)
-        iptm = conf.get("iptm", conf.get("protein_iptm"))
-        plddt = conf.get("complex_plddt")
-        bptm = binder_ptm(conf, args.binder_chain_idx)
         row = dict(
             arm=args.arm, design=name,
             iptm=round(iptm, 4) if iptm is not None else np.nan,
             complex_plddt=round(plddt, 4) if plddt is not None else np.nan,
             binder_ptm=round(bptm, 4) if bptm is not None else np.nan,
             binder_rmsd=round(rmsd, 2) if rmsd == rmsd else np.nan,
-            confidence_score=conf.get("confidence_score"),
+            iptm_std=round(iptm_std, 4),
+            plddt_std=round(plddt_std, 4),
+            n_models=n_models,
+            confidence_score=conf0.get("confidence_score"),
             pdb=os.path.basename(pdb) if pdb else "",
         )
+        # PASS uses the point estimate (mean in aggregate modes) against thresholds.
         row["pass"] = bool(
             (row["iptm"] >= args.iptm_min if row["iptm"] == row["iptm"] else False)
             and (row["complex_plddt"] >= args.plddt_min if row["complex_plddt"] == row["complex_plddt"] else False)
@@ -141,20 +204,28 @@ def main():
             and (row["binder_rmsd"] <= args.rmsd_max if row["binder_rmsd"] == row["binder_rmsd"] else True)
         )
         row["composite_score"] = composite_score(row)
+        # stability-penalised ranking score: subtract penalty*iptm_std from composite.
+        if args.aggregate == "mean_penalty":
+            row["rank_score"] = round(row["composite_score"] - args.stability_penalty * iptm_std, 4)
+        else:
+            row["rank_score"] = row["composite_score"]
         rows.append(row)
 
-    rows.sort(key=lambda r: (-int(r["pass"]), -r["composite_score"]))
+    # rank on rank_score (= composite in single/mean modes; composite - penalty*std in mean_penalty)
+    rows.sort(key=lambda r: (-int(r["pass"]), -r["rank_score"]))
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     import csv
-    cols = ["arm", "design", "pass", "composite_score", "iptm", "complex_plddt",
-            "binder_ptm", "binder_rmsd", "confidence_score", "pdb"]
+    cols = ["arm", "design", "pass", "rank_score", "composite_score", "iptm", "complex_plddt",
+            "binder_ptm", "binder_rmsd", "iptm_std", "plddt_std", "n_models",
+            "confidence_score", "pdb"]
     with open(args.out, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=cols)
         w.writeheader()
         for r in rows:
             w.writerow({k: r.get(k, "") for k in cols})
     npass = sum(r["pass"] for r in rows)
-    print(f"[filter] {len(rows)} designs, {npass} pass -> {args.out}")
+    print(f"[filter] {len(rows)} designs, {npass} pass (aggregate={args.aggregate}, "
+          f"mean n_models={np.mean([r['n_models'] for r in rows]):.1f}) -> {args.out}")
 
 
 if __name__ == "__main__":

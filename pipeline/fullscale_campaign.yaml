@@ -1,0 +1,100 @@
+# =====================================================================
+# NKG7 FULL-SCALE binder campaign — multi-conformer, wide-shortlist funnel
+# =====================================================================
+# Decided 2026-07-13. Screen ds=1 across a conformer ensemble, re-fold a wide
+# top-5% shortlist at ds=5 ranked on the MEAN of 5 folds, then Chai+cross on the
+# ds=5 top-50/arm. Conformer PDBs are filled in from the basin analysis
+# (protein-loop-flexibility): 2 distinct representatives per basin.
+#
+# NOTE: `conformers:` lists are PLACEHOLDERS until cluster_basins.py picks the
+# representatives. The count (currently 4/arm) may rise if basins warrant.
+# =====================================================================
+
+campaign: nkg7_fullscale
+mode_default: production
+
+arms:
+  human_ecl1:
+    species: human
+    epitope: ecl1
+    target_chain: A
+    binder_chain: B
+    hotspot_res: [A36, A43, A45, A47, A50, A56]
+    contig: "[A1-165/0 50-65]"
+    # Multi-method major-basin medoids (basin-analysis 2026-07-13). 2 conformers.
+    conformers:
+      - {id: c0, pdb: targets/conformers/human_ecl1_c0.pdb}   # basin7 3-method (impl+expl+dl, n=57)
+      - {id: c1, pdb: targets/conformers/human_ecl1_c1.pdb}   # basin4 MD-consensus (impl+expl, n=11)
+  human_ecl2:
+    species: human
+    epitope: ecl2
+    target_chain: A
+    binder_chain: B
+    hotspot_res: [A117, A118, A122, A124, A128, A131]
+    contig: "[A1-165/0 50-65]"
+    # Multi-method major-basin medoids. 2 conformers.
+    conformers:
+      - {id: c0, pdb: targets/conformers/human_ecl2_c0.pdb}   # basin4 MD-consensus (impl+expl, n=68)
+      - {id: c1, pdb: targets/conformers/human_ecl2_c1.pdb}   # basin5 MD-consensus (impl+expl, n=30)
+  mouse_ecl1:
+    species: mouse
+    epitope: ecl1
+    target_chain: A
+    binder_chain: B
+    hotspot_res: [A35, A36, A45, A47, A48, A50]
+    contig: "[A1-165/0 50-65]"
+    # Broad 3-method consensus basin (n=85 @2.5A); 3 max-spread reps, one per method.
+    conformers:
+      - {id: c0, pdb: targets/conformers/mouse_ecl1_c0.pdb}   # explicit-MD rep (spread extreme)
+      - {id: c1, pdb: targets/conformers/mouse_ecl1_c1.pdb}   # implicit-MD rep
+      - {id: c2, pdb: targets/conformers/mouse_ecl1_c2.pdb}   # AlphaFlow-DL rep
+  mouse_ecl2:
+    species: mouse
+    epitope: ecl2
+    target_chain: A
+    binder_chain: B
+    hotspot_res: [A117, A122, A123, A124, A128, A131]
+    contig: "[A1-165/0 50-65]"
+    # Multi-method major-basin medoids. 2 conformers.
+    conformers:
+      - {id: c0, pdb: targets/conformers/mouse_ecl2_c0.pdb}   # basin4 MD-consensus (impl+expl, n=72)
+      - {id: c1, pdb: targets/conformers/mouse_ecl2_c1.pdb}   # basin2 MD-consensus (impl+expl, n=9)
+
+species_map: {human: mouse, mouse: human}   # cross-species re-fold pairing
+
+defaults:
+  rfdiffusion:
+    num_designs_production: 10000     # PER CONFORMER (full-cross)
+    diffuser_T: 50
+    bb_per_shard: 500                 # -> 20 shards/conformer (cap-aware: 65 tasks/chain [rfd20+mpnn20+boltz25], 4 chains = 260 < 300)
+    array_throttle: 16                # per-arm; ~64 GPUs across 4 arms
+  proteinmpnn:
+    num_seq_per_target_production: 5  # top-5 seqs/backbone (was 2)
+    sampling_temp: 0.1
+    model_name: v_48_020
+    use_soluble_model: true
+    bb_per_shard: 500
+    array_throttle: 16
+  validator:
+    tool: boltz2
+    diffusion_samples_production: 1   # ds=1 screen
+    folds_per_shard: 2000             # -> 25 shards/conformer at 5 seq/bb
+    array_throttle: 16
+  refold:                             # wide-shortlist ds=5 re-fold stage
+    shortlist_frac: 0.05              # top 5% by composite
+    diffusion_samples: 5
+    aggregate: mean                   # rank on mean of 5 (std reported)
+    stability_penalty: 1.0            # used only if aggregate=mean_penalty
+  consensus:
+    enabled: true
+    tool: chai1
+    topN_frac: 0.10                   # top 10% of the ds=5 shortlist (per-arm abs count, computed at runtime)
+    chai_iptm_min: 0.5
+  crossspecies:
+    enabled: true
+    topN_frac: 0.10
+  filters:
+    iptm_min: 0.5
+    complex_plddt_min: 0.7
+    binder_ptm_min: 0.5
+    binder_rmsd_max: 2.0
