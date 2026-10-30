@@ -2,7 +2,7 @@
 """
 render_jobs.py — render per-arm SLURM job scripts for the binder pipeline from
 a campaign config. Produces self-contained sbatch scripts (absolute paths
-throughout) for each stage of each arm, plus a manifest the orchestrator uses
+throughout) for each stage of each arm, plus a manifest the submit scripts use
 to submit and chain them.
 
 This is the reusable core: point it at a different config (different target,
@@ -18,9 +18,18 @@ Design notes baked into the rendered scripts (see DESIGN_DECISIONS.md):
 
 Usage:
   python render_jobs.py --config configs/nkg7_campaign.yaml \
-      --mode smoketest --ws /lustre/.../nkg7_binder_design --out rendered/
+      --mode smoketest --ws /path/to/workspace --out rendered/
 """
 import argparse, os, yaml, json, stat
+
+ACCOUNT = os.environ.get("SLURM_ACCOUNT", "")
+
+
+def require_account():
+    """Exit with a clear message when the SLURM account is not configured."""
+    if not ACCOUNT:
+        raise SystemExit("set SLURM_ACCOUNT to your SLURM account name (e.g. export SLURM_ACCOUNT=my_account)")
+
 
 SBATCH_HEADER = """#SBATCH --account={account}
 #SBATCH --partition={partition}
@@ -50,7 +59,7 @@ def rfd_script(arm, cfg, ws, mode):
     # numbering them contiguously via inference.design_startnum so files never collide.
     array_line = f"#SBATCH --array=0-{nshards-1}%{throttle}\n" if nshards > 1 else ""
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='32G')}{array_line}set -eo pipefail
+{SBATCH_HEADER.format(account=ACCOUNT, partition=partition, time=time, gpus=1, cpus=8, mem='32G')}{array_line}set -eo pipefail
 {CONDA}
 conda activate SE3nv
 module load CUDA/11.7.0
@@ -97,7 +106,7 @@ def mpnn_script(arm, cfg, ws, mode):
     sol = "--use_soluble_model" if d["use_soluble_model"] else ""
     tchain = a["target_chain"]
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition='mlgpu_devel' if mode=='smoketest' else 'mlgpu_short', time='00:30:00' if mode=='smoketest' else '02:00:00', gpus=1, cpus=8, mem='32G')}
+{SBATCH_HEADER.format(account=ACCOUNT, partition='mlgpu_devel' if mode=='smoketest' else 'mlgpu_short', time='00:30:00' if mode=='smoketest' else '02:00:00', gpus=1, cpus=8, mem='32G')}
 set -eo pipefail
 {CONDA}
 conda activate SE3nv
@@ -141,7 +150,7 @@ def boltz_script(arm, cfg, ws, mode):
     yamldir = f"{outdir}/yamls"
     target_seq_file = f"{ws}/targets/{sp}_target.seq"
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition='mlgpu_devel' if mode=='smoketest' else 'mlgpu_short', time='01:00:00' if mode=='smoketest' else '08:00:00', gpus=1, cpus=8, mem='48G')}set -eo pipefail
+{SBATCH_HEADER.format(account=ACCOUNT, partition='mlgpu_devel' if mode=='smoketest' else 'mlgpu_short', time='01:00:00' if mode=='smoketest' else '08:00:00', gpus=1, cpus=8, mem='48G')}set -eo pipefail
 {CONDA}
 conda activate boltz
 mkdir -p {yamldir} {outdir}
@@ -176,7 +185,7 @@ def chai_script(arm, cfg, ws, mode):
     partition = "mlgpu_devel" if mode == "smoketest" else "mlgpu_short"
     time = "01:00:00" if mode == "smoketest" else "08:00:00"
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='64G')}set -eo pipefail
+{SBATCH_HEADER.format(account=ACCOUNT, partition=partition, time=time, gpus=1, cpus=8, mem='64G')}set -eo pipefail
 {CONDA}
 conda activate boltz
 mkdir -p {outdir}
@@ -217,7 +226,7 @@ def crossspecies_script(arm, cfg, ws, mode):
     partition = "mlgpu_devel" if mode == "smoketest" else "mlgpu_short"
     time = "01:00:00" if mode == "smoketest" else "08:00:00"
     return f"""#!/bin/bash
-{SBATCH_HEADER.format(account='ag_iei_abdullah', partition=partition, time=time, gpus=1, cpus=8, mem='48G')}set -eo pipefail
+{SBATCH_HEADER.format(account=ACCOUNT, partition=partition, time=time, gpus=1, cpus=8, mem='48G')}set -eo pipefail
 {CONDA}
 conda activate boltz
 mkdir -p {outdir}
@@ -246,10 +255,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", required=True)
     ap.add_argument("--mode", choices=["smoketest", "production"], default="smoketest")
-    ap.add_argument("--ws", required=True, help="marvin workspace absolute path")
+    ap.add_argument("--ws", required=True, help="workspace absolute path")
     ap.add_argument("--out", default="rendered")
     ap.add_argument("--arms", nargs="*", default=None, help="subset of arms (default: all)")
     args = ap.parse_args()
+    require_account()
 
     cfg = yaml.safe_load(open(args.config))
     os.makedirs(args.out, exist_ok=True)

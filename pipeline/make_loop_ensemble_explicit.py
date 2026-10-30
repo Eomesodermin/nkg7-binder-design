@@ -25,7 +25,6 @@ Usage:
       --n-conformers 20 --production-ns 50 --seed 1 --out runs/md_explicit/human
 """
 import argparse, os
-import numpy as np
 
 
 def parse_windows(specs):

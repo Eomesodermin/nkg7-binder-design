@@ -117,12 +117,12 @@ the final report can cite it.
   and validation stages are modality-agnostic and can be reused if we add a
   nanobody arm later.
 
-## 8. Validator = Boltz-2 (pip), forced by a marvin hardware constraint
+## 8. Validator = Boltz-2 (pip), forced by a the HPC cluster hardware constraint
 
 - **Decision.** Use **Boltz-2**, pip-installed into a dedicated conda env, as
   the structure-based validator — not the cluster's ColabFold or Boltz-1
   EasyBuild modules.
-- **Why (empirical, not a preference).** marvin's GPU (`mlgpu`, A40) nodes have
+- **Why (empirical, not a preference).** the cluster's GPU (`mlgpu`, A40) nodes have
   **AMD CPUs with AVX2 but no AVX-512**, while the `easybuild-INTEL` software
   stack is compiled with AVX-512. Both the ColabFold/1.5.2 and Boltz-1/0.4.1
   modules therefore crash instantly with `Illegal instruction` (SIGILL, exit
@@ -160,15 +160,15 @@ the final report can cite it.
   artifacts; requiring two independent models to agree is a standard, cheap
   guard for de novo binders. Chai-1 is Apache-2.0, pip-installed (AVX2-safe like
   Boltz — §8), and runs on ESM embeddings without an MSA server, so it needs no
-  compute-node egress. (2) The user runs separate human and mouse campaigns and
-  explicitly wanted cross-reactivity tested; making it a stage means every
+  compute-node egress. (2) Human and mouse campaigns run separately and
+  cross-reactivity needs testing; making it a stage means every
   campaign produces the cross read automatically rather than depending on a
   manual follow-up. (3) A self-contained bundle is what a collaborator or wet-lab
   actually needs.
 - **Rejected alternatives.** (a) Leaving these as manual steps — rejected because
   they were easy to forget and the cross-species read was a stated requirement.
   (b) A third validator (AF2/OpenFold3) for consensus — deferred; two-model
-  consensus is the usual bar and AF2 is blocked on marvin's AMD nodes anyway (§8).
+  consensus is the usual bar and AF2 is blocked on the cluster's AMD nodes anyway (§8).
   (c) Folding *all* designs cross-species — wasteful; only the native top-N are
   worth the cross read, controlled by `crossspecies.topn_*`.
 - **Residual risk.** Consensus uses ESM-embedding (no-MSA) Chai, a few ipTM
@@ -177,7 +177,7 @@ the final report can cite it.
   signal, not a binding assay; all cross-reactive calls need experimental
   confirmation. Both stages are `enabled:` flags in the config, so a target where
   they don't apply (single species, no second model available) skips them cleanly.
-- **Verification.** Both stages were run end-to-end on marvin A40 nodes for two
+- **Verification.** Both stages were run end-to-end on the HPC cluster A40 nodes for two
   smoke-test arms (human_ecl2, mouse_ecl2): Chai scored all 8 designs/arm,
   cross-species folded 8 complexes/arm against the opposite target, and harvest
   merged `consensus_pass`/`cross_species_pass`/`chai_iptm`/`cross_iptm` into the
@@ -227,3 +227,60 @@ round-2 refinement discussion.
   is exactly how our `harvest/top_candidates/` winners would feed a refinement
   arm. When we revisit refinement, this paper is a validated blueprint for the
   partial-diffusion route (vs. EvoPro's sequence-only, AF2-scored GA).
+
+---
+
+## 11. Pre-flight gates before full-scale: fold-noise + loop-basin convergence
+
+Before committing hundreds of GPU-h to a full-scale (10k+ backbone) campaign,
+we ran two cheap pre-flight checks. Both returned consequential results that
+reshaped the full-scale design — documenting here so the "why we escalated
+before scaling" reasoning is preserved.
+
+### Gate 1 — fold-score sampling noise (is ds=1 ranking trustworthy?)
+We re-folded 24 production designs (6 per arm, spanning the composite range) at
+Boltz diffusion_samples ds=1 and ds=5, and compared against the original
+production ipTM.
+- ds=1 vs ds=5 (same fresh run): Spearman rho = 0.72 — sampling noise meaningfully
+  shuffles the ranking.
+- Production ipTM vs a fresh ds=5 refold: rho = **0.47** — low. Single-fold
+  production ipTM is a noisy estimator of a design's "true" score.
+- Headline case: `human_ecl2_482_s9`, our best human_ecl2 design, production
+  ipTM **0.884** -> ds=5 refold **0.195**. It was largely a lucky fold.
+  Conversely `human_ecl1_242_s7` rose from ds=1 0.214 -> ds=5 0.688.
+- Within-5 spread: mean per-design ipTM std = 0.076; SEM of the mean falls
+  ds1 0.076 -> ds5 0.034 -> ds10 0.024 (curve flattens after ds=5).
+
+**Decision:** the full-scale funnel screens at ds=1 (cheap breadth) then
+**re-folds a WIDE shortlist at ds=5**, ranking on the **mean** of the 5 folds
+(not best-of-5, which re-introduces the lucky-fold bias), with the per-design
+std reported. `filter_designs.py` gained `--aggregate {single,mean,mean_penalty}`
+(mean_penalty subtracts penalty*iptm_std from the composite to demote unstable
+designs). ds=5 is sufficient for a screening re-fold; higher ds gives
+diminishing returns.
+
+### Gate 2 — loop-basin convergence (is one static conformer enough?)
+We characterized the flexibility (implicit-MD ensemble) but originally DESIGNED
+against a single static AlphaFold conformer. To test whether that is
+defensible, we ran 4 independent-seed implicit-MD replicas per species and
+compared within-replica loop RMSF against cross-replica basin separation:
+
+| loop | within-rep RMSF | cross-rep max | verdict |
+|---|---|---|---|
+| human_ECL1 | 0.98 | 2.79 | DIVERGENT |
+| human_ECL2 | 0.84 | 1.36 | DIVERGENT |
+| mouse_ECL1 | 1.00 | 3.57 | DIVERGENT |
+| mouse_ECL2 | 0.82 | 1.09 | borderline |
+
+The seeds do NOT settle into one basin — the loops (ECL1 especially) explore
+multiple states. Designing against one static conformer risks
+shape-complementarity to a state the loop rarely adopts.
+
+**Decision:** escalate loop characterization before full-scale
+(gating rule set in advance: divergence -> escalate). Two independent Tier-3
+methods, run in parallel: (3a) explicit-solvent MD (TIP3P/PME/NPT, 50 ns) and
+(3b) an orthogonal DL ensemble (AlphaFlow MD+Templates, MSA-backed). Pool all
+conformer sources, cluster on loop CA-RMSD to identify basins, and design the
+full-scale campaign against **2-3 representative conformers per basin** (chosen
+by maximum structural spread), not one snapshot. A basin populated by BOTH
+physics and DL is high-confidence.

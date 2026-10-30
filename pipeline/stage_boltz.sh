@@ -6,7 +6,7 @@
 # per-chain pTM) that filter_designs.py consumes.
 #
 # We use Boltz-2 (pip env) NOT the ColabFold/Boltz-1 EasyBuild modules, which
-# SIGILL on marvin's AVX-512-less AMD mlgpu nodes. Single-sequence mode
+# SIGILL on the cluster's AVX-512-less AMD mlgpu nodes. Single-sequence mode
 # (msa: empty) is standard for de novo binder validation and avoids the
 # api.colabfold.com egress dependency on compute nodes.
 #

@@ -8,7 +8,7 @@
 # Called by run_pipeline.py, which fills the @@PLACEHOLDERS@@ from the campaign
 # config. Can also be run standalone by exporting the same env vars.
 #
-# Required env vars (exported by the orchestrator or set manually):
+# Required env vars (exported by the render scripts or set manually):
 #   RFD_DIR       path to RFdiffusion install
 #   MODELS_DIR    path to RFdiffusion model weights
 #   TARGET_PDB    fixed target PDB (full-length receptor, chain A)

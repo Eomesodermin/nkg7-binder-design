@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+title: "NKG7 mini-binder design pipeline"
+message: "If you use this pipeline, please cite it as below."
+type: software
+authors:
+  - family-names: Corvino
+    given-names: Dillon
+    website: "https://dilloncorvino.com"
+abstract: >-
+  Config-driven de novo mini-binder design pipeline (RFdiffusion, ProteinMPNN, Boltz-2,
+  Chai-1 consensus, cross-species testing) applied to the extracellular loops of human and
+  mouse NKG7, with a sequence-complexity audit of the designed binders.
+repository-code: "https://github.com/Eomesodermin/nkg7-binder-design"
+license: MIT
+keywords:
+  - de novo protein design
+  - mini-binder
+  - RFdiffusion
+  - ProteinMPNN
+  - Boltz-2
+  - NKG7

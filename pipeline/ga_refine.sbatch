@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=nkg7_ga
-#SBATCH --account=ag_iei_abdullah
+#SBATCH --account=@@ACCOUNT@@
 #SBATCH --partition=mlgpu_medium
 #SBATCH --gres=gpu:a40:1
 #SBATCH --cpus-per-task=8

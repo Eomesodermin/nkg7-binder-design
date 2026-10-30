@@ -1,0 +1,22 @@
+# Heavy data stays on the cluster, not in the repo
+*.dcd
+*.xtc
+*.trr
+*.mp4
+*.tar.gz
+runs/
+rendered/
+tmp/
+msas/
+hole_out/
+# AlphaFold monomers regenerable from accessions are kept in targets/; other downloads are not
+AF-*.pdb
+*_v6.pdb
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+# OS
+.DS_Store

@@ -26,8 +26,7 @@ Usage:
       --loops 30-60 113-132 \
       --n-conformers 12 --out targets/ensembles/human
 """
-import argparse, os, sys
-import numpy as np
+import argparse, os
 
 
 def parse_windows(specs):

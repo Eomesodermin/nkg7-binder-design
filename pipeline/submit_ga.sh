@@ -1,7 +1,7 @@
 #!/bin/bash
 # submit_ga.sh — render + submit the partial-diffusion GA refinement campaign.
 #
-# Usage: NOTIFY_EMAIL=you@uni-bonn.de bash submit_ga.sh <WS>
+# Usage: NOTIFY_EMAIL=you@example.org bash submit_ga.sh <WS>
 #
 # Submits ONE array job (one task per arm), throttled %2 (<=2 GPUs at once), plus
 # a single dependent harvest+notify job that emails ONCE when all arms finish.
@@ -32,7 +32,7 @@ narms=$(echo $ARMS_LIST | wc -w)
 armquoted=$(for a in $ARMS_LIST; do echo -n "\"$a\" "; done)
 
 # --- render the array driver from the template ---
-sed -e "s|@@WS@@|$WS|g" \
+sed -e "s|@@WS@@|$WS|g" -e "s|@@ACCOUNT@@|$SLURM_ACCOUNT|g" \
     -e "s|@@ARMS@@|$armquoted|g" \
     -e "s|@@GENERATIONS@@|$GENERATIONS|g" \
     -e "s|@@K@@|$K|g" \
@@ -53,7 +53,7 @@ echo "[submit] GA array job: $GA_JID  (arms: $ARMS_LIST, throttle %$THROTTLE)"
 
 # --- harvest + single email, depends on ALL arms finishing (afterany) ---
 NOTIFY_JID=$(sbatch --parsable --dependency=afterany:${GA_JID} \
-  --account=ag_iei_abdullah --partition=intelsr_short --time=00:20:00 \
+  --account="${SLURM_ACCOUNT:?set SLURM_ACCOUNT}" --partition=intelsr_short --time=00:20:00 \
   --job-name=nkg7_ga_notify --mail-type=END,FAIL --mail-user=$NOTIFY_EMAIL \
   --output=$RUNDIR/ga_notify_%j.out \
   --wrap="source /opt/software/easybuild-INTEL/software/Miniforge3/24.1.2-0/etc/profile.d/conda.sh; conda activate boltz; python $PIPE/ga_harvest.py --ga-dir $RUNDIR --arms '$ARMS_LIST' --out $RUNDIR/ga_summary.csv")

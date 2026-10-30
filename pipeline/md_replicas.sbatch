@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=nkg7_mdrep
-#SBATCH --account=ag_iei_abdullah
+# NOTE: set --account (and partition) for your cluster before submitting
+#SBATCH --account=YOUR_SLURM_ACCOUNT
 #SBATCH --partition=mlgpu_short
 #SBATCH --gres=gpu:a40:1
 #SBATCH --cpus-per-task=8
@@ -19,7 +20,7 @@ set -eo pipefail
 source /opt/software/easybuild-INTEL/software/Miniforge3/24.1.2-0/etc/profile.d/conda.sh
 conda activate openmm-env
 
-WS=/lustre/scratch/data/dcorvino_hpc-nkg7_binder_design
+WS="${WS:?set WS to your campaign workspace directory}"
 PIPE=$WS/pipeline
 OUT=$WS/runs/md_replicas
 mkdir -p $OUT

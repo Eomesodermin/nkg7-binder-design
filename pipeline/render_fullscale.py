@@ -24,7 +24,14 @@ bounded waves so queued array tasks stay under the 300 MaxSubmit cap.
 """
 import argparse, json, os, stat, yaml
 
-ACCT = "ag_iei_abdullah"
+ACCT = os.environ.get("SLURM_ACCOUNT", "")
+
+
+def require_account():
+    """Exit with a clear message when the SLURM account is not configured."""
+    if not ACCT:
+        raise SystemExit("set SLURM_ACCOUNT to your SLURM account name (e.g. export SLURM_ACCOUNT=my_account)")
+
 CONDA = "source /opt/software/easybuild-INTEL/software/Miniforge3/24.1.2-0/etc/profile.d/conda.sh"
 
 HDR = """#SBATCH --account={acct}
@@ -315,6 +322,7 @@ def main():
     ap.add_argument("--out", default="rendered_fullscale")
     ap.add_argument("--arms", nargs="*", default=None)
     args = ap.parse_args()
+    require_account()
     cfg = yaml.safe_load(open(args.config))
     os.makedirs(args.out, exist_ok=True)
     arms = args.arms or list(cfg["arms"].keys())

@@ -18,7 +18,7 @@ deliverable is self-contained rather than pointers into scratch.
 
 Usage:
   python harvest.py --config configs/nkg7_campaign.yaml --mode smoketest \
-      --ws /lustre/.../nkg7_binder_design --out harvest_smoketest [--topn 10]
+      --ws /path/to/workspace --out harvest_smoketest [--topn 10]
 """
 import argparse, os, glob, subprocess, sys, csv, json, yaml, shutil, re
 

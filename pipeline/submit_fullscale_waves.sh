@@ -20,7 +20,7 @@ set -eo pipefail
 WS="${1:?need workspace}"
 REND="${2:?need rendered-dir}"
 MAXC="${MAX_CHAINS_IN_FLIGHT:-4}"   # 4 chains x 65 coarse-shard tasks = 260 < 300 cap, ~64 GPUs at %16
-ACCT=ag_iei_abdullah
+ACCT="${SLURM_ACCOUNT:?set SLURM_ACCOUNT to your SLURM account}"
 JOBMAP="$WS/runs/fullscale/chain_jobids.tsv"
 mkdir -p "$(dirname "$JOBMAP")"; : > "$JOBMAP"
 
@@ -87,11 +87,11 @@ for cdir in $(ls -d "$REND"/*__consensus/ 2>/dev/null | xargs -n1 basename); do
   LAST_CROSS_IDS+=("$jx")
 done
 
-# --- Email-on-completion: one tiny job held afterany ALL cross jobs, emails the user.
+# --- Email-on-completion: one tiny job held afterany ALL cross jobs, emails $NOTIFY_EMAIL.
 if [ ${#LAST_CROSS_IDS[@]} -gt 0 ] && [ -n "${NOTIFY_EMAIL:-}" ]; then
   alldeps=$(IFS=:; echo "${LAST_CROSS_IDS[*]}")
   jn=$(sbatch --parsable --dependency=afterany:$alldeps \
-        --account=ag_iei_abdullah --partition=intelsr_short --time=00:05:00 \
+        --account="${SLURM_ACCOUNT:?set SLURM_ACCOUNT}" --partition=intelsr_short --time=00:05:00 \
         --ntasks=1 --cpus-per-task=1 --mem=2G --job-name=nkg7_done \
         --mail-user="$NOTIFY_EMAIL" --mail-type=END,FAIL \
         --wrap="echo 'NKG7 full-scale campaign complete. Results under $WS/runs/fullscale/*/{04_chai,05_crossspecies,06_refold}.'")

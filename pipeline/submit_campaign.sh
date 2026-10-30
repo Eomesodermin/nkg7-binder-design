@@ -67,7 +67,7 @@ if [ -n "$NOTIFY_EMAIL" ] && [ -n "$TERMINAL_IDS" ]; then
   mkdir -p "$WS/runs/$MODE/harvest"
   cat > "$NOTIFY" <<NOTIFYEOF
 #!/bin/bash
-#SBATCH --account=ag_iei_abdullah
+#SBATCH --account=${SLURM_ACCOUNT:?set SLURM_ACCOUNT}
 #SBATCH --partition=intelsr_short
 #SBATCH --time=01:00:00
 #SBATCH --ntasks=1 --cpus-per-task=4 --mem=16G

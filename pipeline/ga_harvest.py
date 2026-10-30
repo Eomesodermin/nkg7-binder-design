@@ -11,7 +11,7 @@ all generations, seeds included) and:
 
 Stdlib only. Run in any env with python3.
 """
-import argparse, csv, os, glob, shutil
+import argparse, csv, os, shutil
 
 def read_csv(p):
     if not os.path.exists(p): return []

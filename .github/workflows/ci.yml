@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: ruff check pipeline tests
+      - run: pytest -q
+      - name: Render the smoke-test job scripts
+        env:
+          SLURM_ACCOUNT: ci
+        run: python pipeline/render_jobs.py --config configs/nkg7_campaign.yaml --mode smoketest --ws /tmp/ws --out /tmp/rendered
+      - name: Syntax-check shell scripts
+        run: for f in pipeline/*.sh; do bash -n "$f"; done

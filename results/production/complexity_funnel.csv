@@ -1,0 +1,10 @@
+step,value
+designs scored,6000
+ipTM >= 0.5,767
+ipTM >= 0.5 and complex pLDDT >= 0.7,6
+passing all Boltz-2 filters,3
+not low-complexity,27
+"not low-complexity, ipTM >= 0.5",1
+"not low-complexity, ipTM >= 0.5 and pLDDT >= 0.7",0
+"median alanine fraction, all designs",0.533
+"median alanine fraction, ipTM >= 0.5",0.581
